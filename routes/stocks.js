@@ -9,10 +9,8 @@ const authorize = (req, res, next) => {
 
   if(authorization && authorization.split(" ").length == 2){
     token = authorization.split(" ")[1]
-    console.log("Token: ", token)
   } else {
-    console.log("Unauthorized user")
-    res.status(401).json({error: true, message: "Unauthorized"})
+    res.status(403).json({error: true, message: "Unauthorized"})
     return
   }
 
@@ -30,45 +28,97 @@ const authorize = (req, res, next) => {
 }
 
 router.get('/symbols', function(req, res, next){
-  console.log(req.query.industry)
   var query;
-  if(req.query.industry){
-    query = req.db.from('stocks').select('name', 'symbol', 'industry').where('industry','like','%'+req.query.industry+'%').distinct()
-  }else{
-    query = req.db.from('stocks').select('name', 'symbol', 'industry').distinct()
+  if(Object.keys(req.query).length == 0 || Object.keys(req.query).length > 1){
+    if(Object.keys(req.query).length > 1){
+      res.status(400).json({
+        error: true,
+        message: "Invalid query parameter: only 'industry' is permitted"
+      })
+      return
+    }
+    else{
+      query = req.db.from('stocks').select('name', 'symbol', 'industry').distinct()
+    }
+  }
+  else{
+    if(req.query.industry){
+      query = req.db.from('stocks').select('name', 'symbol', 'industry').where('industry','like','%'+req.query.industry+'%').distinct()
+    }
+    else{
+      res.status(400).json({
+        error: true,
+        message: "Invalid query parameter: only 'industry' is permitted"
+      })
+      return
+    }
   }
   query
     .then(rows => {
-    res.json(rows)
-  })
-  .catch(err => {
-    console.log(err);
-    res.json({"Error": true, "Message": err})
-  })
+      if(rows.length == 0){
+        res.status(404).json({error: true, message: "Industry sector not found"})
+        return
+      }
+      res.json(rows)
+    })
 })
 
 router.get('/:Symbol', function(req, res, next){
-  req.db.from('stocks').select('*').where('symbol','=',req.params.Symbol)
+  if(Object.keys(req.query).length != 0){
+    res.status(400).json({
+      error: true,
+      message: "Date parameters only available on authenticated route /stocks/authed"
+    })
+    return
+  }
+  req.db.from('stocks').select('*').where('symbol','=',req.params.Symbol).orderBy('timestamp','desc')
   .then(row => {
+    if(row.length == 0){
+      res.status(404).json({
+        error: true,
+        message: "No entry for symbol in stocks database"
+      })
+    }
     res.json(row[0])
-  })
-  .catch(err => {
-    console.log(err)
-    res.json({"Error": true, "Message": err})
   })
 })
 
 router.get('/authed/:Symbol', authorize, function(req, res, next){
-  req.db.from('stocks').select('*')
-  .where('symbol','=',req.params.Symbol)
-  .andWhere('timestamp', '>', req.query.from)
-  .andWhere('timestamp', '<', req.query.to)
+  var query;
+  if(req.query.from){
+    if(req.query.to){
+      query = req.db.from('stocks').select('*').where('symbol','=',req.params.Symbol).andWhere('timestamp','>=',req.query.from).andWhere('timestamp','<=',req.query.to)
+    }
+    else{
+      query = req.db.from('stocks').select('*').where('symbol','=',req.params.Symbol).andWhere('timestamp','>=',req.query.from)
+    }
+  }
+  else if(req.query.to){
+    query = req.db.from('stocks').select('*').where('symbol','=',req.params.Symbol).andWhere('timestamp','<=',req.query.to)
+  }
+  else{
+    if(Object.keys(req.query).length != 0){
+      res.status(400).json({
+        error: true,
+        message: "Parameters allowed are 'from' and 'to', example: /stocks/authed/AAL?from=2020-03-15"
+      })
+      return
+    }
+    else{
+      query = req.db.from('stocks').select('*').where('symbol','=',req.params.Symbol) 
+    }
+  }
+
+  query
   .then(rows => {
+    if(rows.length == 0){
+      res.status(404).json({
+        error: true,
+        message: "No entries available for query symbol for supplied date range"
+      })
+      return
+    }
     res.json(rows)
-  })
-  .catch(err => {
-    console.log(err)
-    res.json({"Error": true, "Message": err})
   })
 })
 
